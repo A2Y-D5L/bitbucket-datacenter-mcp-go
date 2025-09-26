@@ -17,7 +17,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	client, session, stop, err := mcpserver.Start(ctx, nil)
+	_, session, stop, err := mcpserver.Start(ctx, nil)
 	if err != nil {
 		log.Fatalf("start MCP server: %v", err)
 	}
@@ -32,18 +32,10 @@ func main() {
 			return
 		}
 		// Example: list OPEN PRs (first page).
-		params := &mcp.CallToolParams{
-			Name: "bb.pr.list",
-			Arguments: map[string]any{
-				"projectKey": project,
-				"repoSlug":   repo,
-				"state":      "OPEN",
-				"limit":      5,
-			},
-		}
+		params := mcpserver.NewListPRsToolCallParams(project, repo, "OPEN", 0, 5)
 		res, err := session.CallTool(ctx, params)
 		if err != nil {
-			log.Fatalf("CallTool(bb.pr.list) failed: %v", err)
+			log.Fatalf("CallTool(%s) failed: %v", params.Name, err)
 		}
 		if res.IsError {
 			// Print MCP-side error text.
@@ -65,24 +57,27 @@ func main() {
 		}
 		fmt.Printf("List PRs Result:\n%s\n", out.String())
 
-		// Optional: create a comment on a PR if DEMO_PR_ID and DEMO_COMMENT are provided.
 		if prIDStr := os.Getenv("DEMO_PR_ID"); prIDStr != "" && os.Getenv("DEMO_COMMENT") != "" {
 			prID, _ := strconv.Atoi(prIDStr)
-			cres, err := session.CallTool(ctx, &mcp.CallToolParams{
-				Name: "bb.pr.comments.create",
-				Arguments: map[string]any{
-					"projectKey": project,
-					"repoSlug":   repo,
-					"id":         prID,
-					"text":       os.Getenv("DEMO_COMMENT"),
-				},
-			})
+			// Call the create comment tool.
+			params := mcpserver.NewCreatePRCommentToolCallParams(project, repo, prID, os.Getenv("DEMO_COMMENT"))
+			result, err := session.CallTool(ctx, params)
 			if err != nil {
-				log.Fatalf("CallTool(bb.pr.comments.create) failed: %v", err)
+				log.Fatalf("CallTool(%s) failed: %v", params.Name, err)
 			}
-			if cres.IsError {
+			if result.IsError {
 				var buf strings.Builder
-				for _, c := range cres.Content {
+				for _, c := range result.Content {
+					if tc, ok := c.(*mcp.TextContent); ok {
+						buf.WriteString(tc.Text)
+						buf.WriteByte('\n')
+					}
+				}
+				log.Fatalf("CallTool(%s) failed: %v", params.Name, err)
+			}
+			if result.IsError {
+				var buf strings.Builder
+				for _, c := range result.Content {
 					if tc, ok := c.(*mcp.TextContent); ok {
 						buf.WriteString(tc.Text)
 						buf.WriteByte('\n')
@@ -90,10 +85,8 @@ func main() {
 				}
 				log.Fatalf("MCP tool error: %s", buf.String())
 			}
-			fmt.Println("Created comment successfully.")
+			fmt.Printf("CallTool(%s) succeeded.\n", params.Name)
 		}
-
-		_ = client // client can be used for additional MCP features if desired
 	}
 
 }

@@ -80,7 +80,7 @@ func Start(ctx context.Context, opts *ServerOptions) (serverClient *mcp.Client, 
 	impl := &mcp.Implementation{Name: "bitbucket-prs", Version: "v8.19"}
 	server := mcp.NewServer(impl, nil)
 	// Register PR tools.
-	RegisterTools(server, bbAPI, RegisterPullRequestTools)
+	RegisterTools(server, bbAPI, RegisterAllPullRequestTools)
 
 	// Create a pair of in-memory transports: one for the server, one for the client.
 	serverT, clientT := mcp.NewInMemoryTransports()

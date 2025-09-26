@@ -100,9 +100,10 @@ type (
 	}
 )
 
+// NewListPRsTool creates a tool and handler for listing PRs with optional state and paging.
 func NewListPRsTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[ListPRsInput, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PullRequest]]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.list",
+			Name:        "bitbucket.data-center.pr.list",
 			Description: "List pull requests (state: OPEN|MERGED|DECLINED|ALL; supports paging)",
 		}, mcp.ToolHandlerFor[ListPRsInput, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PullRequest]](func(ctx context.Context, req *mcp.CallToolRequest, in ListPRsInput) (*mcp.CallToolResult, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PullRequest], error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" {
@@ -116,9 +117,30 @@ func NewListPRsTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandl
 		})
 }
 
+// NewListPRsToolCallParams creates the call parameters for the list PRs tool.
+func NewListPRsToolCallParams(
+	projectKey string,
+	repoSlug string,
+	state string,
+	start int,
+	limit int,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.list",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"state":      state,
+			"start":      start,
+			"limit":      limit,
+		},
+	}
+}
+
+// NewGetPRTool creates a tool and handler for getting a PR by ID.
 func NewGetPRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[GetPRInput, *bitbucketdatacenter.PullRequest]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.get",
+			Name:        "bitbucket.data-center.pr.get",
 			Description: "Get a pull request by ID",
 		}, mcp.ToolHandlerFor[GetPRInput, *bitbucketdatacenter.PullRequest](func(ctx context.Context, req *mcp.CallToolRequest, in GetPRInput) (*mcp.CallToolResult, *bitbucketdatacenter.PullRequest, error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 {
@@ -132,9 +154,26 @@ func NewGetPRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandler
 		})
 }
 
+// NewGetPRToolCallParams creates the call parameters for the get PR tool.
+func NewGetPRToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.get",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"id":         id,
+		},
+	}
+}
+
+// NewCreatePRTool creates a tool and handler for creating a new PR.
 func NewCreatePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[CreatePRInput, *bitbucketdatacenter.PullRequest]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.create",
+			Name:        "bitbucket.data-center.pr.create",
 			Description: "Create a new pull request",
 		}, mcp.ToolHandlerFor[CreatePRInput, *bitbucketdatacenter.PullRequest](func(ctx context.Context, req *mcp.CallToolRequest, in CreatePRInput) (*mcp.CallToolResult, *bitbucketdatacenter.PullRequest, error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.Title == "" || in.FromRefID == "" || in.ToRefID == "" {
@@ -158,9 +197,36 @@ func NewCreatePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHand
 		})
 }
 
+// NewCreatePRToolCallParams creates the call parameters for the create PR tool.
+func NewCreatePRToolCallParams(
+	projectKey string,
+	repoSlug string,
+	title string,
+	description string,
+	fromRefID string,
+	toRefID string,
+	reviewers []string,
+	draft bool,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.create",
+		Arguments: map[string]any{
+			"projectKey":  projectKey,
+			"repoSlug":    repoSlug,
+			"title":       title,
+			"description": description,
+			"fromRefId":   fromRefID,
+			"toRefId":     toRefID,
+			"reviewers":   reviewers,
+			"draft":       draft,
+		},
+	}
+}
+
+// NewUpdatePRTool creates a tool and handler for updating a PR's title/description.
 func NewUpdatePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[UpdatePRInput, *bitbucketdatacenter.PullRequest]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.update",
+			Name:        "bitbucket.data-center.pr.update",
 			Description: "Update PR title/description (requires current version)",
 		}, mcp.ToolHandlerFor[UpdatePRInput, *bitbucketdatacenter.PullRequest](func(ctx context.Context, req *mcp.CallToolRequest, in UpdatePRInput) (*mcp.CallToolResult, *bitbucketdatacenter.PullRequest, error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 || in.Version == 0 {
@@ -175,9 +241,32 @@ func NewUpdatePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHand
 		})
 }
 
+// NewUpdatePRToolCallParams creates the call parameters for the update PR tool.
+func NewUpdatePRToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	version int,
+	title string,
+	description string,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.update",
+		Arguments: map[string]any{
+			"projectKey":  projectKey,
+			"repoSlug":    repoSlug,
+			"id":          id,
+			"version":     version,
+			"title":       title,
+			"description": description,
+		},
+	}
+}
+
+// NewMergePRTool creates a tool and handler for merging a PR.
 func NewMergePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[MergePRInput, *bitbucketdatacenter.PullRequest]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.merge",
+			Name:        "bitbucket.data-center.pr.merge",
 			Description: "Merge a pull request (requires current version)",
 		}, mcp.ToolHandlerFor[MergePRInput, *bitbucketdatacenter.PullRequest](func(ctx context.Context, req *mcp.CallToolRequest, in MergePRInput) (*mcp.CallToolResult, *bitbucketdatacenter.PullRequest, error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 || in.Version == 0 {
@@ -192,9 +281,32 @@ func NewMergePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandl
 		})
 }
 
+// NewMergePRToolCallParams creates the call parameters for the merge PR tool.
+func NewMergePRToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	version int,
+	message string,
+	strategyID string,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.merge",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"id":         id,
+			"version":    version,
+			"message":    message,
+			"strategyId": strategyID,
+		},
+	}
+}
+
+// NewDeclinePRTool creates a tool and handler for declining a PR.
 func NewDeclinePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[DeclinePRInput, *bitbucketdatacenter.PullRequest]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.decline",
+			Name:        "bitbucket.data-center.pr.decline",
 			Description: "Decline a pull request (requires current version)",
 		}, mcp.ToolHandlerFor[DeclinePRInput, *bitbucketdatacenter.PullRequest](func(ctx context.Context, req *mcp.CallToolRequest, in DeclinePRInput) (*mcp.CallToolResult, *bitbucketdatacenter.PullRequest, error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 || in.Version == 0 {
@@ -208,9 +320,28 @@ func NewDeclinePRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHan
 		})
 }
 
+// NewDeclinePRToolCallParams creates the call parameters for the decline PR tool.
+func NewDeclinePRToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	version int,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.decline",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"id":         id,
+			"version":    version,
+		},
+	}
+}
+
+// NewReopenPRTool creates a tool and handler for reopening a declined PR.
 func NewReopenPRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[ReopenPRInput, *bitbucketdatacenter.PullRequest]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.reopen",
+			Name:        "bitbucket.data-center.pr.reopen",
 			Description: "Reopen a declined pull request (requires current version)",
 		}, mcp.ToolHandlerFor[ReopenPRInput, *bitbucketdatacenter.PullRequest](func(ctx context.Context, req *mcp.CallToolRequest, in ReopenPRInput) (*mcp.CallToolResult, *bitbucketdatacenter.PullRequest, error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 || in.Version == 0 {
@@ -224,9 +355,28 @@ func NewReopenPRTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHand
 		})
 }
 
+// NewReopenPRToolCallParams creates the call parameters for the reopen PR tool.
+func NewReopenPRToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	version int,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.reopen",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"id":         id,
+			"version":    version,
+		},
+	}
+}
+
+// NewListPRActivitiesTool creates a tool and handler for listing PR activities.
 func NewListPRActivitiesTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[ActivitiesInput, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PRActivity]]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.activities",
+			Name:        "bitbucket.data-center.pr.activities",
 			Description: "List PR activities (comments, commits, etc.)",
 		}, mcp.ToolHandlerFor[ActivitiesInput, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PRActivity]](func(ctx context.Context, req *mcp.CallToolRequest, in ActivitiesInput) (*mcp.CallToolResult, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PRActivity], error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 {
@@ -240,9 +390,30 @@ func NewListPRActivitiesTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.
 		})
 }
 
+// NewListPRActivitiesToolCallParams creates the call parameters for the list PR activities tool.
+func NewListPRActivitiesToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	start int,
+	limit int,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.activities",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"id":         id,
+			"start":      start,
+			"limit":      limit,
+		},
+	}
+}
+
+// NewListPRCommentsTool creates a tool and handler for listing PR comments.
 func NewListPRCommentsTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[ListCommentsInput, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PRComment]]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.comments.list",
+			Name:        "bitbucket.data-center.pr.comments.list",
 			Description: "List comments on a pull request",
 		}, mcp.ToolHandlerFor[ListCommentsInput, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PRComment]](func(ctx context.Context, req *mcp.CallToolRequest, in ListCommentsInput) (*mcp.CallToolResult, *bitbucketdatacenter.PagedResponse[bitbucketdatacenter.PRComment], error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 {
@@ -256,9 +427,30 @@ func NewListPRCommentsTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.To
 		})
 }
 
+// NewListPRCommentsToolCallParams creates the call parameters for the list PR comments tool.
+func NewListPRCommentsToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	start int,
+	limit int,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.comments.list",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"id":         id,
+			"start":      start,
+			"limit":      limit,
+		},
+	}
+}
+
+// NewCreatePRCommentTool creates a tool and handler for creating PR comments.
 func NewCreatePRCommentTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[CreateCommentInput, *bitbucketdatacenter.PRComment]) {
 	return &mcp.Tool{
-			Name:        "bb.pr.comments.create",
+			Name:        "bitbucket.data-center.pr.comments.create",
 			Description: "Create a comment on a pull request",
 		}, mcp.ToolHandlerFor[CreateCommentInput, *bitbucketdatacenter.PRComment](func(ctx context.Context, req *mcp.CallToolRequest, in CreateCommentInput) (*mcp.CallToolResult, *bitbucketdatacenter.PRComment, error) {
 			if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 {
@@ -272,7 +464,26 @@ func NewCreatePRCommentTool(bbAPI *bitbucketdatacenter.Client) (*mcp.Tool, mcp.T
 		})
 }
 
-func RegisterPullRequestTools(srv *mcp.Server, bbc *bitbucketdatacenter.Client) {
+// NewCreatePRCommentToolCallParams creates the call parameters for the create PR comment tool.
+func NewCreatePRCommentToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	text string,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.comments.create",
+		Arguments: map[string]any{
+			"projectKey": projectKey,
+			"repoSlug":   repoSlug,
+			"id":         id,
+			"text":       text,
+		},
+	}
+}
+
+// RegisterAllPullRequestTools adds all PR-related tools to the given MCP server.
+func RegisterAllPullRequestTools(srv *mcp.Server, bbc *bitbucketdatacenter.Client) {
 	listTool, listHandler := NewListPRsTool(bbc)
 	mcp.AddTool(srv, listTool, listHandler)
 	getTool, getHandler := NewGetPRTool(bbc)
