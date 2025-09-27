@@ -18,21 +18,16 @@ import (
 
 // Config holds all inputs (env-driven only).
 type Config struct {
-	// Vertex AI / GenAI
-	Model       string
-	Project     string
-	Location    string
-	UseVertex   bool
-	// Bitbucket PR target
-	ProjectKey  string
-	RepoSlug    string
-	PRID        int
-	// Diff options
-	ContextLines       int
-	MaxPromptChars     int
-	// Behavior
-	PostComments       bool
-	ReadOnly           bool
+	Model          string
+	Project        string
+	Location       string
+	UseVertex      bool
+	ProjectKey     string
+	RepoSlug       string
+	PRID           int
+	ContextLines   int
+	MaxPromptChars int
+	PostComments   bool
 }
 
 // loadConfig reads from env and validates.
@@ -40,16 +35,15 @@ func loadConfig() (*Config, error) {
 	get := func(k string) string { return strings.TrimSpace(os.Getenv(k)) }
 
 	cfg := &Config{
-		Model:           fallback(get("GENAI_MODEL"), "gemini-2.0-flash"),
-		Project:         get("GOOGLE_CLOUD_PROJECT"),
-		Location:        fallback(get("GOOGLE_CLOUD_LOCATION"), "global"),
-		UseVertex:       strings.EqualFold(get("GOOGLE_GENAI_USE_VERTEXAI"), "true"),
-		ProjectKey:      fallback(get("REVIEW_PROJECT"), os.Getenv("BITBUCKET_DEFAULT_PROJECT")),
-		RepoSlug:        get("REVIEW_REPO"),
-		ReadOnly:        strings.EqualFold(get("BITBUCKET_READ_ONLY"), "true"),
-		PostComments:    strings.EqualFold(get("REVIEW_POST_COMMENTS"), "true"),
-		MaxPromptChars:  atoiDefault(get("REVIEW_MAX_PROMPT_CHARS"), 180000),
-		ContextLines:    atoiDefault(get("REVIEW_CONTEXT_LINES"), 10),
+		Model:          fallback(get("GENAI_MODEL"), "gemini-2.0-flash"),
+		Project:        get("GOOGLE_CLOUD_PROJECT"),
+		Location:       fallback(get("GOOGLE_CLOUD_LOCATION"), "global"),
+		UseVertex:      strings.EqualFold(get("GOOGLE_GENAI_USE_VERTEXAI"), "true"),
+		ProjectKey:     fallback(get("REVIEW_PROJECT"), os.Getenv("BITBUCKET_DEFAULT_PROJECT")),
+		RepoSlug:       get("REVIEW_REPO"),
+		PostComments:   strings.EqualFold(get("REVIEW_POST_COMMENTS"), "true"),
+		MaxPromptChars: atoiDefault(get("REVIEW_MAX_PROMPT_CHARS"), 180000),
+		ContextLines:   atoiDefault(get("REVIEW_CONTEXT_LINES"), 10),
 	}
 
 	// Required for PR targeting
@@ -103,11 +97,11 @@ func atoiDefault(s string, def int) int {
 
 // ReviewFinding is the structured shape we ask the model to return.
 type ReviewFinding struct {
-	Title   string   `json:"title"`
-	Severity string  `json:"severity"`  // "info"|"nit"|"suggestion"|"warning"|"critical"
-	Files   []string `json:"files,omitempty"`
+	Title    string   `json:"title"`
+	Severity string   `json:"severity"` // "info"|"nit"|"suggestion"|"warning"|"critical"
+	Files    []string `json:"files,omitempty"`
 	// A concise comment for the PR thread (Markdown allowed)
-	Comment string  `json:"comment"`
+	Comment string `json:"comment"`
 }
 
 type ReviewOutput struct {
@@ -119,11 +113,11 @@ type ReviewOutput struct {
 
 // connectMCP spawns the Bitbucket MCP server as a subprocess and returns a live session.
 func connectMCP(ctx context.Context, cfg *Config) (*mcp.ClientSession, func(), error) {
-    _, session, stop, err := mcpserver.Start(ctx, nil)
-    if err != nil {
-        return nil, nil, fmt.Errorf("start MCP server: %w", err)
-    }
-    return session, stop, nil
+	_, session, stop, err := mcpserver.Start(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("start MCP server: %w", err)
+	}
+	return session, stop, nil
 }
 
 // callTool is a thin helper to call MCP tools with arguments.
@@ -151,25 +145,24 @@ func callTool(ctx context.Context, s *mcp.ClientSession, name string, args map[s
 // fetchPRContext pulls PR metadata + diff via MCP.
 func fetchPRContext(ctx context.Context, s *mcp.ClientSession, cfg *Config) (prJSON string, diff string, comments string, err error) {
 	args := map[string]any{
-		"project":   cfg.ProjectKey,
-		"repository": cfg.RepoSlug,
-		"prId":      cfg.PRID,
+		"projectKey": cfg.ProjectKey,
+		"repoSlug":   cfg.RepoSlug,
+		"id":         cfg.PRID,
 	}
-	prJSON, err = callTool(ctx, s, "get_pull_request", args)
+	prJSON, err = callTool(ctx, s, "bitbucket.data-center.pr.get", args) // Updated tool name
 	if err != nil {
 		return
 	}
-	diff, err = callTool(ctx, s, "get_diff", map[string]any{
-		"project":         cfg.ProjectKey,
-		"repository":      cfg.RepoSlug,
-		"prId":            cfg.PRID,
-		"contextLines":    cfg.ContextLines,
-		"maxLinesPerFile": atoiDefault(os.Getenv("BITBUCKET_DIFF_MAX_LINES_PER_FILE"), 0),
+	diff, err = callTool(ctx, s, "bitbucket.data-center.pr.diff.raw", map[string]any{
+		"projectKey":   cfg.ProjectKey,
+		"repoSlug":     cfg.RepoSlug,
+		"id":           cfg.PRID,
+		"contextLines": cfg.ContextLines,
 	})
 	if err != nil {
 		return
 	}
-	comments, err = callTool(ctx, s, "get_comments", args)
+	comments, err = callTool(ctx, s, "bitbucket.data-center.pr.comments.list", args) // Updated tool name
 	return
 }
 
@@ -266,58 +259,49 @@ func runLLM(ctx context.Context, model string, cfg *genai.GenerateContentConfig,
 	return &out, nil
 }
 
-func postComments(ctx context.Context, s *mcp.ClientSession, cfg *Config, findings []ReviewFinding) error {
-    if cfg.ReadOnly || !cfg.PostComments || len(findings) == 0 {
-        return nil
-    }
-    
-    for _, f := range findings {
-        text := fmt.Sprintf("**%s** _(severity: %s)_\n\nFiles: %s\n\n%s",
-            f.Title, f.Severity, strings.Join(f.Files, ", "), f.Comment)
-        
-        args := map[string]any{
-            "projectKey": cfg.ProjectKey,  // Changed from "project"
-            "repoSlug":   cfg.RepoSlug,    // Changed from "repository"
-            "id":         cfg.PRID,        // Changed from "prId"
-            "text":       text,
-        }
-        
-        // Updated tool name:
-        if _, err := callTool(ctx, s, "bitbucket.data-center.pr.comments.create", args); err != nil {
-            return fmt.Errorf("add_comment failed: %w", err)
-        }
-        
-        time.Sleep(300 * time.Millisecond)
-    }
-    return nil
-}
-
-func mapsClone(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
+func postComments(ctx context.Context, s *mcp.ClientSession, findings []ReviewFinding, projKey, repoSlug string, prID int) error {
+	if len(findings) == 0 {
+		return nil
 	}
-	return out
+
+	for _, f := range findings {
+		text := fmt.Sprintf("**%s** _(severity: %s)_\n\nFiles: %s\n\n%s",
+			f.Title, f.Severity, strings.Join(f.Files, ", "), f.Comment)
+
+		args := map[string]any{
+			"projectKey": projKey,
+			"repoSlug":   repoSlug,
+			"id":         prID,
+			"text":       text,
+		}
+
+		if _, err := callTool(ctx, s, "bitbucket.data-center.pr.comments.create", args); err != nil {
+			return fmt.Errorf("add_comment failed: %w", err)
+		}
+
+		time.Sleep(300 * time.Millisecond)
+	}
+	return nil
 }
 
 func main() {
-    log.SetFlags(0)
-    ctx := context.Background()
+	log.SetFlags(0)
+	ctx := context.Background()
 
-    cfg, err := loadConfig()
-    if err != nil {
-        log.Fatalf("config error: %v", err)
-    }
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatalf("config error: %v", err)
+	}
 
 	// Connect to Bitbucket Data Center MCP Server.
-    session, stop, err := connectMCP(ctx, cfg)
-    if err != nil {
-        log.Fatalf("MCP connection failed: %v", err)
-    }
-    defer stop()  // Stop the MCP server when done
+	session, stop, err := connectMCP(ctx, cfg)
+	if err != nil {
+		log.Fatalf("MCP connection failed: %v", err)
+	}
+	defer stop() // Stop the MCP server when done
 
 	// Pull PR context + diff.
-    prJSON, diff, comments, err := fetchPRContext(ctx, session, cfg)
+	prJSON, diff, comments, err := fetchPRContext(ctx, session, cfg)
 	if err != nil {
 		log.Fatalf("Failed to fetch PR context: %v", err)
 	}
@@ -328,7 +312,7 @@ func main() {
 	var temp float32 = 0.2
 	instructions := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: system}}},
-		Temperature: &temp,
+		Temperature:       &temp,
 	}
 
 	out, err := runLLM(ctx, cfg.Model, instructions, user)
@@ -336,7 +320,6 @@ func main() {
 		log.Fatalf("LLM error: %v", err)
 	}
 
-	// Print a console summary and (optionally) post comments back.
 	fmt.Println("=== Review Summary ===")
 	fmt.Println(out.Summary)
 	if len(out.Risks) > 0 {
@@ -358,7 +341,7 @@ func main() {
 		}
 	}
 
-	if err := postComments(ctx, session, cfg, out.Findings); err != nil {
+	if err := postComments(ctx, session, out.Findings, cfg.ProjectKey, cfg.RepoSlug, cfg.PRID); err != nil {
 		log.Fatalf("posting comments failed: %v", err)
 	}
 

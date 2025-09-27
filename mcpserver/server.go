@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/a2y-d5l/bitbucket-datacenter-mcp-go/bitbucketdatacenter"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -54,7 +55,9 @@ import (
 // ========================
 
 type ServerOptions struct {
-	// Reserved for future: logging, additional tools, etc.
+	// Cache configuration for intelligent caching layer
+	Cache       *CacheConfig
+	EnableCache bool
 }
 
 type ToolRegistrationFunc func(server *mcp.Server, bbAPI *bitbucketdatacenter.Client)
@@ -79,8 +82,56 @@ func Start(ctx context.Context, opts *ServerOptions) (serverClient *mcp.Client, 
 
 	impl := &mcp.Implementation{Name: "bitbucket-prs", Version: "v8.19"}
 	server := mcp.NewServer(impl, nil)
-	// Register PR tools.
-	RegisterTools(server, bbAPI, RegisterAllPullRequestTools)
+	
+	// Initialize cache if enabled
+	var cache Cache
+	var cacheManager *CacheManager
+	if opts != nil && opts.EnableCache {
+		cacheConfig := CacheConfig{
+			TTL:               10 * time.Minute,
+			MaxEntries:        1000,
+			MaxMemoryBytes:    100 * 1024 * 1024, // 100MB
+			MaxEntrySizeBytes: 10 * 1024 * 1024,  // 10MB
+			CleanupInterval:   1 * time.Minute,
+			EnableMetrics:     true,
+			EnableCompression: true,
+		}
+		
+		// Override with user-provided config if available
+		if opts.Cache != nil {
+			if opts.Cache.TTL > 0 {
+				cacheConfig.TTL = opts.Cache.TTL
+			}
+			if opts.Cache.MaxEntries > 0 {
+				cacheConfig.MaxEntries = opts.Cache.MaxEntries
+			}
+			if opts.Cache.MaxMemoryBytes > 0 {
+				cacheConfig.MaxMemoryBytes = opts.Cache.MaxMemoryBytes
+			}
+			if opts.Cache.MaxEntrySizeBytes > 0 {
+				cacheConfig.MaxEntrySizeBytes = opts.Cache.MaxEntrySizeBytes
+			}
+			if opts.Cache.CleanupInterval > 0 {
+				cacheConfig.CleanupInterval = opts.Cache.CleanupInterval
+			}
+			cacheConfig.EnableMetrics = opts.Cache.EnableMetrics
+			cacheConfig.EnableCompression = opts.Cache.EnableCompression
+		}
+		
+		cacheManager = NewCacheManager(cacheConfig)
+		cache = cacheManager
+		log.Printf("Cache enabled with TTL=%v, MaxEntries=%d, MaxMemory=%dMB", 
+			cacheConfig.TTL, cacheConfig.MaxEntries, cacheConfig.MaxMemoryBytes/(1024*1024))
+	}
+	
+	// Register PR tools (cached or regular based on configuration)
+	if opts != nil && opts.EnableCache && cache != nil {
+		RegisterAllCachedPullRequestTools(server, bbAPI, cache)
+		log.Printf("Registered cached PR tools")
+	} else {
+		RegisterTools(server, bbAPI, RegisterAllPullRequestTools)
+		log.Printf("Registered standard PR tools")
+	}
 
 	// Create a pair of in-memory transports: one for the server, one for the client.
 	serverT, clientT := mcp.NewInMemoryTransports()
@@ -103,12 +154,11 @@ func Start(ctx context.Context, opts *ServerOptions) (serverClient *mcp.Client, 
 
 	stop = func() {
 		_ = session.Close()
+		if cacheManager != nil {
+			_ = cacheManager.Close()
+		}
 		cancel()
 	}
 	return client, session, stop, nil
 
 }
-
-// =====================================
-// Demo main (optional) — set RUN_DEMO=1
-// =====================================
