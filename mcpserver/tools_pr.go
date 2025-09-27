@@ -9,7 +9,6 @@ import (
 )
 
 type (
-	// bb.pr.list
 	ListPRsInput struct {
 		ProjectKey string `json:"projectKey" jsonschema:"Project key (e.g., PROJ)"`
 		RepoSlug   string `json:"repoSlug"   jsonschema:"Repository slug"`
@@ -18,14 +17,12 @@ type (
 		Limit      int    `json:"limit,omitempty" jsonschema:"optional paging size"`
 	}
 
-	// bb.pr.get
 	GetPRInput struct {
 		ProjectKey string `json:"projectKey"`
 		RepoSlug   string `json:"repoSlug"`
 		ID         int    `json:"id"`
 	}
 
-	// bb.pr.create
 	CreatePRInput struct {
 		ProjectKey  string   `json:"projectKey"`
 		RepoSlug    string   `json:"repoSlug"`
@@ -37,7 +34,6 @@ type (
 		Draft       bool     `json:"draft,omitempty"`
 	}
 
-	// bb.pr.update
 	UpdatePRInput struct {
 		ProjectKey  string `json:"projectKey"`
 		RepoSlug    string `json:"repoSlug"`
@@ -47,7 +43,6 @@ type (
 		Description string `json:"description,omitempty"`
 	}
 
-	// bb.pr.merge
 	MergePRInput struct {
 		ProjectKey string `json:"projectKey"`
 		RepoSlug   string `json:"repoSlug"`
@@ -57,7 +52,6 @@ type (
 		StrategyID string `json:"strategyId,omitempty" jsonschema:"e.g., no-ff, squash, merge-commit (varies by server settings)"`
 	}
 
-	// bb.pr.decline
 	DeclinePRInput struct {
 		ProjectKey string `json:"projectKey"`
 		RepoSlug   string `json:"repoSlug"`
@@ -65,7 +59,6 @@ type (
 		Version    int    `json:"version"`
 	}
 
-	// bb.pr.reopen
 	ReopenPRInput struct {
 		ProjectKey string `json:"projectKey"`
 		RepoSlug   string `json:"repoSlug"`
@@ -73,7 +66,6 @@ type (
 		Version    int    `json:"version"`
 	}
 
-	// bb.pr.activities
 	ActivitiesInput struct {
 		ProjectKey string `json:"projectKey"`
 		RepoSlug   string `json:"repoSlug"`
@@ -82,7 +74,6 @@ type (
 		Limit      int    `json:"limit,omitempty"`
 	}
 
-	// bb.pr.comments.list
 	ListCommentsInput struct {
 		ProjectKey string `json:"projectKey"`
 		RepoSlug   string `json:"repoSlug"`
@@ -91,12 +82,25 @@ type (
 		Limit      int    `json:"limit,omitempty"`
 	}
 
-	// bb.pr.comments.create
 	CreateCommentInput struct {
 		ProjectKey string `json:"projectKey"`
 		RepoSlug   string `json:"repoSlug"`
 		ID         int    `json:"id"`
 		Text       string `json:"text"`
+	}
+
+	DiffPRInput struct {
+		ProjectKey   string `json:"projectKey"`
+		RepoSlug     string `json:"repoSlug"`
+		ID           int    `json:"id"`
+		ContextLines int    `json:"contextLines,omitempty"` // optional
+		Whitespace   string `json:"whitespace,omitempty"`   // optional; e.g., "ignore-all"
+	}
+
+	// Tool result wrapper for diff text to keep responses structured JSON.
+	DiffPRResult struct {
+		// Unified diff text for the requested PR.
+		Diff string `json:"diff"`
 	}
 )
 
@@ -482,6 +486,47 @@ func NewCreatePRCommentToolCallParams(
 	}
 }
 
+func NewDiffPRTool(server *mcp.Server, bb *bitbucketdatacenter.Client) (*mcp.Tool, mcp.ToolHandlerFor[DiffPRInput, *DiffPRResult]) {
+	t := mcp.Tool{
+		Name:        "bitbucket.data-center.pr.diff.raw",
+		Description: "Get the unified diff (text) for a pull request. Optional: contextLines (int), whitespace ('ignore-all').",
+	}
+	h := mcp.ToolHandlerFor[DiffPRInput, *DiffPRResult](func(ctx context.Context, req *mcp.CallToolRequest, in DiffPRInput) (*mcp.CallToolResult, *DiffPRResult, error) {
+		if in.ProjectKey == "" || in.RepoSlug == "" || in.ID == 0 {
+			return nil, nil, fmt.Errorf("projectKey, repoSlug, id are required")
+		}
+		diff, err := bb.GetPullRequestRawDiff(ctx, in.ProjectKey, in.RepoSlug, in.ID, bitbucketdatacenter.DiffOptions{
+			ContextLines: in.ContextLines,
+			Whitespace:   in.Whitespace,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get pull request diff: %w", err)
+		}
+		return nil, &DiffPRResult{Diff: diff}, nil
+	})
+
+	return &t, h
+}
+
+func NewDiffPRToolCallParams(
+	projectKey string,
+	repoSlug string,
+	id int,
+	contextLines int,
+	whitespace string,
+) *mcp.CallToolParams {
+	return &mcp.CallToolParams{
+		Name: "bitbucket.data-center.pr.diff.raw",
+		Arguments: map[string]any{
+			"projectKey":   projectKey,
+			"repoSlug":     repoSlug,
+			"id":           id,
+			"contextLines": contextLines,
+			"whitespace":   whitespace,
+		},
+	}
+}
+
 // RegisterAllPullRequestTools adds all PR-related tools to the given MCP server.
 func RegisterAllPullRequestTools(srv *mcp.Server, bbc *bitbucketdatacenter.Client) {
 	listTool, listHandler := NewListPRsTool(bbc)
@@ -504,4 +549,6 @@ func RegisterAllPullRequestTools(srv *mcp.Server, bbc *bitbucketdatacenter.Clien
 	mcp.AddTool(srv, listCommentsTool, listCommentsHandler)
 	createCommentTool, createCommentHandler := NewCreatePRCommentTool(bbc)
 	mcp.AddTool(srv, createCommentTool, createCommentHandler)
+	diffTool, diffHandler := NewDiffPRTool(srv, bbc)
+	mcp.AddTool(srv, diffTool, diffHandler)
 }

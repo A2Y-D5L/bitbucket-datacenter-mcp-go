@@ -117,6 +117,13 @@ type PRComment struct {
 	Created int64          `json:"createdDate,omitempty"`
 }
 
+// DiffOptions allows tuning the raw diff output.
+// Supported in Bitbucket DC: contextLines (int), whitespace ("ignore-all").
+type DiffOptions struct {
+	ContextLines int    // number of context lines around changes
+	Whitespace   string // set to "ignore-all" to ignore whitespace changes
+}
+
 
 type Client struct {
 	BaseURL    string
@@ -210,6 +217,42 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	dec.UseNumber()
 	return dec.Decode(out)
 }
+
+
+// doPlainText performs requests that return plain text (e.g., .diff/.patch).
+func (c *Client) doPlainText(ctx context.Context, method, path string, query url.Values) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.makeURL(path, query), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", c.UserAgent)
+	req.Header.Set("Accept", "text/plain")
+
+	// Auth
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	} else if c.Username != "" && c.Password != "" {
+		cred := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Password))
+		req.Header.Set("Authorization", "Basic "+cred)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		return "", fmt.Errorf("bitbucket %s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(b)))
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func (c *Client) ListPullRequests(ctx context.Context, projectKey, repoSlug string, state string, start, limit int) (*PagedResponse[PullRequest], error) {
 	q := url.Values{}
 	if state != "" {
@@ -328,4 +371,16 @@ func (c *Client) CreateComment(ctx context.Context, projectKey, repoSlug string,
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *Client) GetPullRequestRawDiff(ctx context.Context, projectKey, repoSlug string, prID int, opts DiffOptions) (string, error) {
+	q := url.Values{}
+	if opts.ContextLines > 0 {
+		q.Set("contextLines", strconv.Itoa(opts.ContextLines))
+	}
+	if v := strings.TrimSpace(opts.Whitespace); v != "" {
+		q.Set("whitespace", v) // e.g., "ignore-all"
+	}
+	path := fmt.Sprintf("/projects/%s/repos/%s/pull-requests/%d.diff", url.PathEscape(projectKey), url.PathEscape(repoSlug), prID)
+	return c.doPlainText(ctx, http.MethodGet, path, q)
 }

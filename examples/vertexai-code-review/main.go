@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/a2y-d5l/bitbucket-datacenter-mcp-go/mcpserver"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/genai"
 )
@@ -33,9 +33,6 @@ type Config struct {
 	// Behavior
 	PostComments       bool
 	ReadOnly           bool
-	// MCP server launch
-	MCPCommand string
-	MCPArgs    string
 }
 
 // loadConfig reads from env and validates.
@@ -49,8 +46,6 @@ func loadConfig() (*Config, error) {
 		UseVertex:       strings.EqualFold(get("GOOGLE_GENAI_USE_VERTEXAI"), "true"),
 		ProjectKey:      fallback(get("REVIEW_PROJECT"), os.Getenv("BITBUCKET_DEFAULT_PROJECT")),
 		RepoSlug:        get("REVIEW_REPO"),
-		MCPCommand:      fallback(get("MCP_BITBUCKET_CMD"), "node"),
-		MCPArgs:         get("MCP_BITBUCKET_ARGS"),
 		ReadOnly:        strings.EqualFold(get("BITBUCKET_READ_ONLY"), "true"),
 		PostComments:    strings.EqualFold(get("REVIEW_POST_COMMENTS"), "true"),
 		MaxPromptChars:  atoiDefault(get("REVIEW_MAX_PROMPT_CHARS"), 180000),
@@ -73,9 +68,6 @@ func loadConfig() (*Config, error) {
 	}
 	if cfg.ProjectKey == "" {
 		return nil, errors.New("REVIEW_PROJECT or BITBUCKET_DEFAULT_PROJECT is required")
-	}
-	if cfg.MCPArgs == "" {
-		return nil, errors.New("MCP_BITBUCKET_ARGS must point to the built MCP server JS (e.g., build/index.js)")
 	}
 
 	// Strongly encourage Vertex AI usage here.
@@ -126,19 +118,12 @@ type ReviewOutput struct {
 }
 
 // connectMCP spawns the Bitbucket MCP server as a subprocess and returns a live session.
-func connectMCP(ctx context.Context, cfg *Config) (*mcp.ClientSession, error) {
-	client := mcp.NewClient(&mcp.Implementation{Name: "go-bb-reviewer", Version: "0.1.0"}, nil)
-
-	cmd := exec.Command(cfg.MCPCommand, cfg.MCPArgs)
-	// Inherit current env so the server sees BITBUCKET_* variables and read-only settings.
-	cmd.Env = os.Environ()
-
-	transport := &mcp.CommandTransport{Command: cmd}
-	session, err := client.Connect(ctx, transport, nil)
-	if err != nil {
-		return nil, fmt.Errorf("connect MCP: %w", err)
-	}
-	return session, nil
+func connectMCP(ctx context.Context, cfg *Config) (*mcp.ClientSession, func(), error) {
+    _, session, stop, err := mcpserver.Start(ctx, nil)
+    if err != nil {
+        return nil, nil, fmt.Errorf("start MCP server: %w", err)
+    }
+    return session, stop, nil
 }
 
 // callTool is a thin helper to call MCP tools with arguments.
@@ -281,29 +266,30 @@ func runLLM(ctx context.Context, model string, cfg *genai.GenerateContentConfig,
 	return &out, nil
 }
 
-// postComments posts each finding as a PR comment via MCP add_comment (unless read-only).
 func postComments(ctx context.Context, s *mcp.ClientSession, cfg *Config, findings []ReviewFinding) error {
-	if cfg.ReadOnly || !cfg.PostComments || len(findings) == 0 {
-		return nil
-	}
-	argsBase := map[string]any{
-		"project":    cfg.ProjectKey,
-		"repository": cfg.RepoSlug,
-		"prId":       cfg.PRID,
-	}
-
-	for _, f := range findings {
-		text := fmt.Sprintf("**%s** _(severity: %s)_\n\nFiles: %s\n\n%s",
-			f.Title, f.Severity, strings.Join(f.Files, ", "), f.Comment)
-		args := mapsClone(argsBase)
-		args["text"] = text
-		if _, err := callTool(ctx, s, "add_comment", args); err != nil {
-			return fmt.Errorf("add_comment failed: %w", err)
-		}
-		// Small delay to avoid hammering Bitbucket
-		time.Sleep(300 * time.Millisecond)
-	}
-	return nil
+    if cfg.ReadOnly || !cfg.PostComments || len(findings) == 0 {
+        return nil
+    }
+    
+    for _, f := range findings {
+        text := fmt.Sprintf("**%s** _(severity: %s)_\n\nFiles: %s\n\n%s",
+            f.Title, f.Severity, strings.Join(f.Files, ", "), f.Comment)
+        
+        args := map[string]any{
+            "projectKey": cfg.ProjectKey,  // Changed from "project"
+            "repoSlug":   cfg.RepoSlug,    // Changed from "repository"
+            "id":         cfg.PRID,        // Changed from "prId"
+            "text":       text,
+        }
+        
+        // Updated tool name:
+        if _, err := callTool(ctx, s, "bitbucket.data-center.pr.comments.create", args); err != nil {
+            return fmt.Errorf("add_comment failed: %w", err)
+        }
+        
+        time.Sleep(300 * time.Millisecond)
+    }
+    return nil
 }
 
 func mapsClone(in map[string]any) map[string]any {
@@ -315,23 +301,23 @@ func mapsClone(in map[string]any) map[string]any {
 }
 
 func main() {
-	log.SetFlags(0)
-	ctx := context.Background()
+    log.SetFlags(0)
+    ctx := context.Background()
 
-	cfg, err := loadConfig()
-	if err != nil {
-		log.Fatalf("config error: %v", err)
-	}
+    cfg, err := loadConfig()
+    if err != nil {
+        log.Fatalf("config error: %v", err)
+    }
 
-	// Connect MCP (Bitbucket).
-	session, err := connectMCP(ctx, cfg)
-	if err != nil {
-		log.Fatalf("MCP connection failed: %v", err)
-	}
-	defer session.Close()
+	// Connect to Bitbucket Data Center MCP Server.
+    session, stop, err := connectMCP(ctx, cfg)
+    if err != nil {
+        log.Fatalf("MCP connection failed: %v", err)
+    }
+    defer stop()  // Stop the MCP server when done
 
 	// Pull PR context + diff.
-	prJSON, diff, comments, err := fetchPRContext(ctx, session, cfg)
+    prJSON, diff, comments, err := fetchPRContext(ctx, session, cfg)
 	if err != nil {
 		log.Fatalf("Failed to fetch PR context: %v", err)
 	}
